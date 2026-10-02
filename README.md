@@ -1,47 +1,49 @@
-# Financial Market Data & Risk Analysis in SQL
+# Financial Market Data, Risk & Portfolio Analytics in SQL
 
-A personal project building a relational database in SQLite to store multi-asset daily market data (450+ trading sessions across equities and index ETFs) and compute key quantitative indicators directly in SQL.
-
-I built this project to apply relational modeling and time-series concepts using window functions and CTEs.
+A financial engineering project building a 3NF relational database in SQLite. It ingests 450+ daily trading sessions across equities and index ETFs, applies performance & downside risk metrics directly via SQL window functions, and models a transaction-based portfolio tracker with real-time unrealized PnL and PRU (cost basis) calculations.
 
 ---
 
-## Database Design
+## Architecture & Schema Design
 
-The schema (`schema.sql`) models price history in 3NF:
+The schema (`schema.sql`) implements Third Normal Form (3NF) relational design:
 
-* **`assets`**: reference table for instruments (ticker, name, asset class, base currency).
-* **`daily_prices`**: daily OHLC quotes, adjusted close, and volume linked via foreign key with a composite unique constraint on `(asset_id, trade_date)`.
+* **`assets`**: Instrument static data (ticker, name, asset class, base currency).
+* **`daily_prices`**: Daily OHLCV quotes with a composite unique constraint on `(asset_id, trade_date)`.
+* **`transactions`**: Portfolio trade blotter (trade date, execution side, quantity, price, fees).
+
+### Query Optimization (`indexes.sql`)
+* B-Tree composite index `(asset_id, trade_date)` to avoid full table scans during chronological ordering and partition grouping.
+* Covering index on `assets(ticker)` for fast joins.
 
 ---
 
-## Key SQL Implementations
+## Analytical Modules
 
-### 1. Rolling Momentum & Moving Averages (`analysis.sql`)
-* Uses `LAG()` over partition by asset to retrieve the previous close and calculate daily returns.
-* Computes rolling 3-day simple moving average (`SMA`) using `ROWS BETWEEN 2 PRECEDING AND CURRENT ROW`.
-* Tracks intraday price spread relative to open.
+### 1. Momentum & Rolling Indicators (`analysis.sql`)
+* Evaluates intraday spread and daily percentage returns using `LAG()`.
+* Computes rolling 3-day simple moving averages (`SMA`) using `ROWS BETWEEN 2 PRECEDING AND CURRENT ROW`.
 
-### 2. High-Water Mark & Drawdown Tracking (`drawdown.sql`)
-* Measures drawdown by comparing daily close against the historical peak price using `MAX(close_price) OVER (PARTITION BY asset_id ORDER BY trade_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)`.
+### 2. High-Water Mark & Downside Risk (`drawdown.sql` & `risk_summary.sql`)
+* Computes dynamic peak prices using cumulative `MAX() OVER (...)`.
+* Evaluates running drawdown and historical Maximum Drawdown (`MDD`) across multi-year sessions.
 
-### 3. Aggregate Risk Profile (`risk_summary.sql`)
-* Aggregates multi-year performance across assets to compute total trading days, average daily returns, and historical Maximum Drawdown (`MDD`).
+### 3. Portfolio Tracking & Cost Basis (`portfolio.sql`)
+* Aggregates trade history to compute volume-weighted average price (PRU / Cost Basis) including fees.
+* Joins the latest available market quotes to evaluate position market values, unrealized profit & loss, and percentage performance.
 
 ---
 
 ## Quickstart
 
-Run with SQLite locally:
-
 ```bash
-# 1. Initialize schema and generate dataset (450+ sessions)
+# 1. Initialize schema, indexes, and market data (450+ sessions)
 sqlite3 market_data.db < schema.sql
+sqlite3 market_data.db < indexes.sql
 python3 generate_data.py
 sqlite3 market_data.db < seed_full.sql
 
-# 2. Run analysis and risk queries
-sqlite3 -column -header market_data.db < analysis.sql
-sqlite3 -column -header market_data.db < drawdown.sql
+# 2. Run risk and portfolio analytics
 sqlite3 -column -header market_data.db < risk_summary.sql
+sqlite3 -column -header market_data.db < portfolio.sql
 ```
