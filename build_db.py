@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Construit market_data.db de zéro (idempotent).
+"""Builds market_data.db from scratch (safe to re-run).
 
-Source des prix, par actif :
-  1. data/prices/<TICKER>.csv  (format Yahoo Finance)  -> data_source = YAHOO_CSV
-  2. sinon, simulation (--simulate)                     -> data_source = SIMULATED
-Sans CSV ni --simulate, le build échoue : on ne génère jamais de fausses données en silence.
+Price source, per asset:
+  1. data/prices/<TICKER>.csv  (Yahoo Finance format)  -> data_source = YAHOO_CSV
+  2. otherwise, simulated prices (only with --simulate) -> data_source = SIMULATED
+With no CSV and no --simulate the build stops: fake data is never generated silently.
 """
 import argparse
 import csv
@@ -15,32 +15,33 @@ from datetime import date, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).parent
-ASSETS = [  # ticker, nom, classe, devise
+ASSETS = [  # ticker, name, asset class, currency
     ("MC.PA", "LVMH Moët Hennessy", "Equities", "EUR"),
     ("SPY", "SPDR S&P 500 ETF Trust", "Equities", "USD"),
 ]
-SIM_PARAMS = {"MC.PA": (680.0, 0.0002, 0.015, 0.6), "SPY": (490.0, 0.0004, 0.010, 1.0)}  # start, drift, vol, loading marché
+# start price, daily drift, daily vol, loading on the common market factor
+SIM_PARAMS = {"MC.PA": (680.0, 0.0002, 0.015, 0.6), "SPY": (490.0, 0.0004, 0.010, 1.0)}
 
 
 def read_yahoo_csv(path: Path):
-    """Lit un CSV Yahoo (Date,Open,High,Low,Close,Adj Close,Volume) et le valide."""
+    """Reads a Yahoo CSV (Date,Open,High,Low,Close,Adj Close,Volume) and checks it."""
     text = path.read_text(encoding="utf-8-sig")
     if text.lstrip().lower().startswith(("<!doctype", "<html")):
-        sys.exit(f"{path.name} est une page HTML, pas un CSV. Retélécharge-le (voir fetch_prices.py).")
+        sys.exit(f"{path.name} is an HTML page, not a CSV. Download it again (see fetch_prices.py).")
     rows = []
     for r in csv.DictReader(text.splitlines()):
         try:
             rows.append((r["Date"][:10], float(r["Open"]), float(r["High"]), float(r["Low"]),
                          float(r["Close"]), float(r["Adj Close"]), int(float(r["Volume"] or 0))))
         except (KeyError, ValueError):
-            continue  # lignes 'null' de Yahoo (jours fériés)
+            continue  # skip Yahoo's 'null' rows (market holidays)
     if len(rows) < 30:
-        sys.exit(f"{path.name}: seulement {len(rows)} lignes valides, fichier suspect.")
+        sys.exit(f"{path.name}: only {len(rows)} valid rows, the file looks wrong.")
     return sorted(rows)
 
 
 def simulate(start: date, end: date, seed: int):
-    """Marche aléatoire avec facteur marché commun (donc corrélation/bêta non triviaux)."""
+    """Random walk with a common market factor (so correlation/beta are not trivial)."""
     rng = random.Random(seed)
     days = [start + timedelta(d) for d in range((end - start).days + 1)
             if (start + timedelta(d)).weekday() < 5]
@@ -63,7 +64,7 @@ def simulate(start: date, end: date, seed: int):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=str(ROOT / "market_data.db"))
-    ap.add_argument("--simulate", action="store_true", help="simule les actifs sans CSV")
+    ap.add_argument("--simulate", action="store_true", help="simulate assets that have no CSV")
     ap.add_argument("--start", default="2025-01-01")
     ap.add_argument("--end", default="2026-09-30")
     ap.add_argument("--seed", type=int, default=42)
@@ -79,13 +80,12 @@ def main():
             sim = sim or simulate(date.fromisoformat(args.start), date.fromisoformat(args.end), args.seed)
             prices[ticker] = ("SIMULATED", sim[ticker])
         else:
-            sys.exit(f"Aucune donnée pour {ticker}: ajoute data/prices/{ticker}.csv ou lance avec --simulate.")
+            sys.exit(f"No data for {ticker}: add data/prices/{ticker}.csv or run with --simulate.")
 
     Path(args.db).unlink(missing_ok=True)
     con = sqlite3.connect(args.db)
     con.execute("PRAGMA foreign_keys = ON")
-    for f in ("schema.sql",):
-        con.executescript((ROOT / "sql" / f).read_text())
+    con.executescript((ROOT / "sql" / "schema.sql").read_text())
     with con:
         for ticker, name, cls, ccy in ASSETS:
             source, rows = prices[ticker]
@@ -97,7 +97,7 @@ def main():
     for f in ("views.sql", "portfolio.sql", "seed_transactions.sql"):
         con.executescript((ROOT / "sql" / f).read_text())
     for t, src, n in con.execute("SELECT ticker,data_source,COUNT(*) FROM assets JOIN daily_prices USING(asset_id) GROUP BY 1,2"):
-        print(f"{t:6} {n:4} séances  [{src}]")
+        print(f"{t:6} {n:4} sessions  [{src}]")
     con.close()
 
 

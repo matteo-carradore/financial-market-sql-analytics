@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Affiche les analyses SQL et génère docs/dashboard.png (prix normalisés + drawdown)."""
+"""Prints the SQL analytics and saves docs/dashboard.png (normalised prices + drawdown)."""
 import sqlite3
 from pathlib import Path
 import matplotlib
@@ -11,9 +11,9 @@ ROOT = Path(__file__).parent
 con = sqlite3.connect(ROOT / "market_data.db")
 show = lambda title, q: print(f"\n== {title} ==\n{pd.read_sql(q, con).to_string(index=False)}")
 
-show("Synthèse de risque", "SELECT * FROM v_risk_summary")
-show("Corrélation / bêta", "SELECT * FROM v_correlation")
-show("Positions (devise locale)", "SELECT * FROM v_positions")
+show("Risk summary", "SELECT * FROM v_risk_summary")
+show("Correlation / beta", "SELECT * FROM v_correlation")
+show("Positions (local currency)", "SELECT * FROM v_positions")
 
 px = pd.read_sql("SELECT ticker, trade_date, adjusted_close FROM v_drawdown", con, parse_dates=["trade_date"])
 dd = pd.read_sql("SELECT ticker, trade_date, drawdown FROM v_drawdown", con, parse_dates=["trade_date"])
@@ -26,4 +26,4 @@ for t, g in dd.groupby("ticker"):
 a1.set(title=f"Performance (base 100)  —  sources: {src}"); a1.legend()
 a2.set(title="Drawdown (%)"); a2.legend(); a2.grid(alpha=.3); a1.grid(alpha=.3)
 fig.tight_layout(); (ROOT / "docs").mkdir(exist_ok=True); fig.savefig(ROOT / "docs" / "dashboard.png", dpi=120)
-print("\nGraphique: docs/dashboard.png")
+print("\nChart saved: docs/dashboard.png")
