@@ -1,0 +1,3 @@
+pandas
+matplotlib
+yfinance  # optionnel, uniquement pour fetch_prices.py
